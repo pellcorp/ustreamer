@@ -95,7 +95,7 @@ const char *const US_HTML_INDEX_PAGE = " \
 		</ul> \
 		<br> \
 		<hr> \
-		<a href=\"https://github.com/pikvm/ustreamer\">Sources &amp; docs</a> \
+		<a href=\"https://github.com/pellcorp/ustreamer\">Sources &amp; docs</a> \
 	</body> \
 	</html> \
 ";

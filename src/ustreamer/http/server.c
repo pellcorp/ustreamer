@@ -877,7 +877,7 @@ static void _http_send_snapshot(us_server_s *server) {
 			if (!captured_meta.online) {
 				if (blank == NULL) {
 					blank = us_blank_init();
-					us_blank_draw(blank, "< NO LIVE VIDEO >", captured_meta.width, captured_meta.height);
+					us_blank_draw(blank, "< WEBCAM STOPPED >", captured_meta.width, captured_meta.height);
 				}
 				frame = blank->jpeg;
 			}
