@@ -1,5 +1,6 @@
 /linters/.tox/
 /linters/.mypy_cache/
+.idea
 /pkg/arch/pkg/
 /pkg/arch/src/
 /src/build/

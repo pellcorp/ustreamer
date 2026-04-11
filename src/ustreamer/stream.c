@@ -587,7 +587,7 @@ static int _stream_init_loop(us_stream_s *stream) {
 				// for some reason on a K1 with stock camera we get this error
 				// when disconnected
 				blank_reason = (
-					"< WEBCAM STOPPED >"
+					"< CAMERA STOPPED >"
 				);
 				goto silent_error;
 			case US_ERROR_NO_CABLE:
