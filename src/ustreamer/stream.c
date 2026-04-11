@@ -584,12 +584,10 @@ static int _stream_init_loop(us_stream_s *stream) {
 		switch (us_capture_open(stream->cap)) {
 			case 0: break;
 			case US_ERROR_NO_DEVICE:
+				// for some reason on a K1 with stock camera we get this error
+				// when disconnected
 				blank_reason = (
-					"< NO CAPTURE DEVICE >\n \n"
-					"  Possible reasons:  \n \n"
-					"  - Device unplugged \n \n"
-					"  - Bad config       \n \n"
-					"  - Malfunction      "
+					"< WEBCAM STOPPED >"
 				);
 				goto silent_error;
 			case US_ERROR_NO_CABLE:
