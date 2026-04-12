@@ -80,7 +80,9 @@ typedef struct {
 	us_capture_s	*cap;
 	us_encoder_s	*enc;
 
-	uint			desired_fps;
+	atomic_uint		desired_fps;
+	uint			default_fps;
+	atomic_bool		paused;
 	bool			notify_parent;
 	bool			slowdown;
 	uint			error_delay;

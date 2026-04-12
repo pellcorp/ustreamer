@@ -560,7 +560,9 @@ int us_options_parse(
 		}
 	}
 
-	US_LOG_INFO("Starting PiKVM uStreamer %s ...", US_VERSION);
+	stream->default_fps = atomic_load(&stream->desired_fps);
+
+	US_LOG_INFO("Starting SimpleAF uStreamer %s ...", US_VERSION);
 
 #	define ADD_SINK(x_label, x_prefix) { \
 			if (x_prefix##_name && x_prefix##_name[0] != '\0') { \

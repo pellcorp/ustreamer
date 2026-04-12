@@ -30,6 +30,10 @@
 
 #define US_MAKE_VERSION2(_major, _minor) #_major "." #_minor
 #define US_MAKE_VERSION1(_major, _minor) US_MAKE_VERSION2(_major, _minor)
-#define US_VERSION US_MAKE_VERSION1(US_VERSION_MAJOR, US_VERSION_MINOR)
+#ifdef US_GIT_VERSION
+#	define US_VERSION US_GIT_VERSION
+#else
+#	define US_VERSION US_MAKE_VERSION1(US_VERSION_MAJOR, US_VERSION_MINOR)
+#endif
 
 #define US_VERSION_U ((uint)(US_VERSION_MAJOR * 1000 + US_VERSION_MINOR))

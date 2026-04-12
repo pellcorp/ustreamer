@@ -120,6 +120,7 @@ us_stream_s *us_stream_init(us_capture_s *cap, us_encoder_s *enc) {
 	US_CALLOC(stream, 1);
 	stream->cap = cap;
 	stream->enc = enc;
+	atomic_init(&stream->paused, false);
 	stream->error_delay = 1;
 	stream->h264_bitrate = 5000; // Kbps
 	stream->h264_gop = 30;
@@ -168,6 +169,8 @@ void us_stream_loop(us_stream_s *stream) {
 	}
 
 	while (!_stream_init_loop(stream)) {
+		const uint opened_fps = atomic_load(&stream->desired_fps);
+
 		atomic_bool threads_stop;
 		atomic_init(&threads_stop, false);
 
@@ -233,6 +236,15 @@ void us_stream_loop(us_stream_s *stream) {
 			us_queue_put(releasers[hw->buf.index].q, hw, 0); // Plan to release
 
 			// Мы не обновляем здесь состояние синков, потому что это происходит внутри обслуживающих их потоков
+			const uint desired_fps = atomic_load(&stream->desired_fps);
+			if (desired_fps != opened_fps) {
+				US_LOG_INFO("Desired FPS changed to %u, reopening device ...", desired_fps);
+				goto close;
+			}
+			if (atomic_load(&stream->paused)) {
+				US_LOG_INFO("Camera paused via HTTP, closing device ...");
+				goto close;
+			}
 			_stream_check_suicide(stream);
 			if (stream->slowdown && !_stream_has_any_clients_cached(stream)) {
 				usleep(100 * 1000);
@@ -359,9 +371,10 @@ static void *_jpeg_thread(void *v_ctx) {
 			continue;
 		}
 
-		if (stream->desired_fps > 0) {
+		const uint desired_fps = atomic_load(&stream->desired_fps);
+		if (desired_fps > 0) {
 			const uint captured_fps = us_fpsi_get(stream->run->http->captured_fpsi, NULL);
-			take = ceilf((float)captured_fps / (float)stream->desired_fps);
+			take = ceilf((float)captured_fps / (float)desired_fps);
 			if (step < take) {
 				US_LOG_DEBUG("JPEG: Passed encoding for FPS limit: step=%u, take=%u", step, take);
 				++step;
@@ -433,8 +446,9 @@ static void *_h264_thread(void *v_ctx) {
 		}
 
 		uint fps_limit = stream->run->h264_enc->run->fps_limit;
-		if (stream->desired_fps > 0 && (fps_limit == 0 || stream->desired_fps < fps_limit)) {
-			fps_limit = stream->desired_fps;
+		const uint desired_fps = atomic_load(&stream->desired_fps);
+		if (desired_fps > 0 && (fps_limit == 0 || desired_fps < fps_limit)) {
+			fps_limit = desired_fps;
 		}
 		if (fps_limit > 0) {
 			const uint captured_fps = us_fpsi_get(stream->run->http->captured_fpsi, NULL);
@@ -573,6 +587,12 @@ static int _stream_init_loop(us_stream_s *stream) {
 
 		_stream_check_suicide(stream);
 
+		if (atomic_load(&stream->paused)) {
+			blank_reason = "< CAMERA PAUSED >";
+			US_ONCE({ US_LOG_INFO("Camera paused via HTTP, waiting for resume ..."); });
+			goto offline_and_retry;
+		}
+
 		stream->cap->dma_export = (
 			stream->enc->type == US_ENCODER_TYPE_M2M_VIDEO
 			|| stream->enc->type == US_ENCODER_TYPE_M2M_IMAGE
@@ -581,13 +601,15 @@ static int _stream_init_loop(us_stream_s *stream) {
 			|| stream->drm != NULL
 #			endif
 		);
-		switch (us_capture_open(stream->cap)) {
+		switch (us_capture_open(stream->cap, atomic_load(&stream->desired_fps))) {
 			case 0: break;
 			case US_ERROR_NO_DEVICE:
-				// for some reason on a K1 with stock camera we get this error
-				// when disconnected
 				blank_reason = (
-					"< CAMERA STOPPED >"
+					"< NO CAPTURE DEVICE >\n \n"
+					"  Possible reasons:  \n \n"
+					"  - Device unplugged \n \n"
+					"  - Bad config       \n \n"
+					"  - Malfunction      "
 				);
 				goto silent_error;
 			case US_ERROR_NO_CABLE:

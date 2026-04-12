@@ -128,7 +128,7 @@ int us_capture_parse_format(const char *str);
 int us_capture_parse_standard(const char *str);
 int us_capture_parse_io_method(const char *str);
 
-int us_capture_open(us_capture_s *cap);
+int us_capture_open(us_capture_s *cap, uint fps);
 void us_capture_close(us_capture_s *cap);
 
 int us_capture_hwbuf_grab(us_capture_s *cap, us_capture_hwbuf_s **hw);

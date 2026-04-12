@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdatomic.h>
 #include <string.h>
@@ -84,6 +85,9 @@ static void _http_callback_static(struct evhttp_request *req, void *v_server);
 static void _http_callback_state(struct evhttp_request *req, void *v_server);
 static void _http_callback_snapshot(struct evhttp_request *req, void *v_server);
 
+static void _http_callback_set_fps(struct evhttp_request *req, void *v_server);
+static void _http_callback_pause(struct evhttp_request *req, void *v_server);
+static void _http_callback_resume(struct evhttp_request *req, void *v_server);
 static void _http_callback_stream(struct evhttp_request *req, void *v_server);
 static void _http_callback_stream_write(struct bufferevent *buf_event, void *v_ctx);
 static void _http_callback_stream_error(struct bufferevent *buf_event, short what, void *v_ctx);
@@ -191,6 +195,9 @@ int us_server_listen(us_server_s *server) {
 			US_A(!evhttp_set_cb(run->http, "/favicon.ico", _http_callback_favicon, (void*)server));
 		}
 		US_A(!evhttp_set_cb(run->http, "/state", _http_callback_state, (void*)server));
+		US_A(!evhttp_set_cb(run->http, "/set_fps", _http_callback_set_fps, (void*)server));
+		US_A(!evhttp_set_cb(run->http, "/pause", _http_callback_pause, (void*)server));
+		US_A(!evhttp_set_cb(run->http, "/resume", _http_callback_resume, (void*)server));
 		US_A(!evhttp_set_cb(run->http, "/snapshot", _http_callback_snapshot, (void*)server));
 		US_A(!evhttp_set_cb(run->http, "/stream", _http_callback_stream, (void*)server));
 	}
@@ -301,6 +308,25 @@ static int _http_preprocess_request(struct evhttp_request *req, us_server_s *ser
 
 #define PREPROCESS_REQUEST { \
 		if (_http_preprocess_request(req, server) < 0) { \
+			return; \
+		} \
+	}
+
+static bool _http_is_local_request(struct evhttp_request *req) {
+	char *addr = NULL;
+	unsigned short port = 0;
+	struct evhttp_connection *const conn = evhttp_request_get_connection(req);
+	if (conn == NULL) {
+		return false;
+	}
+	evhttp_connection_get_peer(conn, &addr, &port);
+	return port == 0 // Unix socket
+		|| (addr != NULL && (strcmp(addr, "127.0.0.1") == 0 || strcmp(addr, "::1") == 0));
+}
+
+#define REQUIRE_LOCAL_REQUEST { \
+		if (!_http_is_local_request(req)) { \
+			evhttp_send_reply(req, 403, "Forbidden", NULL); \
 			return; \
 		} \
 	}
@@ -511,7 +537,7 @@ static void _http_callback_state(struct evhttp_request *req, void *v_server) {
 		(server->fake_width ? server->fake_width : captured_meta.width),
 		(server->fake_height ? server->fake_height : captured_meta.height),
 		us_bool_to_string(captured_meta.online),
-		stream->desired_fps,
+		atomic_load(&stream->desired_fps),
 		captured_fps,
 		us_fpsi_get(ex->queued_fpsi, NULL),
 		run->stream_clients_count);
@@ -536,6 +562,74 @@ static void _http_callback_state(struct evhttp_request *req, void *v_server) {
 	_A_ADD_HEADER(req, "Content-Type", "application/json");
 	evhttp_send_reply(req, HTTP_OK, "OK", buf);
 	evbuffer_free(buf);
+}
+
+// Returns true if the fps param was valid (or absent), false if invalid.
+// If fps_str is NULL, does nothing. If "default", restores command-line value.
+// Otherwise parses as a number.
+static bool _http_apply_fps(us_stream_s *stream, const char *fps_str) {
+	if (fps_str == NULL) {
+		return true;
+	}
+	if (!strcmp(fps_str, "default")) {
+		atomic_store(&stream->desired_fps, stream->default_fps);
+		return true;
+	}
+	errno = 0;
+	char *end = NULL;
+	const long fps_val = strtol(fps_str, &end, 10);
+	if (errno || *end || fps_val < 0 || fps_val > US_VIDEO_MAX_FPS) {
+		return false;
+	}
+	atomic_store(&stream->desired_fps, (uint)fps_val);
+	return true;
+}
+
+static void _http_callback_set_fps(struct evhttp_request *req, void *v_server) {
+	us_server_s *const server = v_server;
+
+	PREPROCESS_REQUEST;
+	REQUIRE_LOCAL_REQUEST;
+
+	struct evkeyvalq params;
+	evhttp_parse_query(evhttp_request_get_uri(req), &params);
+	const char *const fps_str = evhttp_find_header(&params, "fps");
+
+	if (fps_str == NULL || !_http_apply_fps(server->stream, fps_str)) {
+		evhttp_send_reply(req, HTTP_INTERNAL, "Invalid or missing 'fps' parameter", NULL);
+	} else {
+		evhttp_send_reply(req, HTTP_OK, "OK", NULL);
+	}
+
+	evhttp_clear_headers(&params);
+}
+
+static void _http_callback_pause(struct evhttp_request *req, void *v_server) {
+	us_server_s *const server = v_server;
+	PREPROCESS_REQUEST;
+	REQUIRE_LOCAL_REQUEST;
+	atomic_store(&server->stream->paused, true);
+	evhttp_send_reply(req, HTTP_OK, "OK", NULL);
+}
+
+static void _http_callback_resume(struct evhttp_request *req, void *v_server) {
+	us_server_s *const server = v_server;
+	PREPROCESS_REQUEST;
+	REQUIRE_LOCAL_REQUEST;
+
+	struct evkeyvalq params;
+	evhttp_parse_query(evhttp_request_get_uri(req), &params);
+	const char *const fps_str = evhttp_find_header(&params, "fps");
+
+	if (!_http_apply_fps(server->stream, fps_str != NULL ? fps_str : "default")) {
+		evhttp_send_reply(req, HTTP_INTERNAL, "Invalid 'fps' parameter", NULL);
+		evhttp_clear_headers(&params);
+		return;
+	}
+
+	evhttp_clear_headers(&params);
+	atomic_store(&server->stream->paused, false);
+	evhttp_send_reply(req, HTTP_OK, "OK", NULL);
 }
 
 static void _http_callback_snapshot(struct evhttp_request *req, void *v_server) {
@@ -875,11 +969,16 @@ static void _http_send_snapshot(us_server_s *server) {
 		if (has_fresh_snapshot || timed_out) {
 			us_frame_s *frame = ex->frame;
 			if (!captured_meta.online) {
-				if (blank == NULL) {
+				const char *const msg = atomic_load(&server->stream->paused)
+					? "< CAMERA PAUSED >"
+					: "< NO LIVE VIDEO >";
+				const uint w = captured_meta.width ? captured_meta.width : server->stream->cap->width;
+				const uint h = captured_meta.height ? captured_meta.height : server->stream->cap->height;
+				if (blank == NULL && w > 0 && h > 0) {
 					blank = us_blank_init();
-					us_blank_draw(blank, "< CAMERA STOPPED >", captured_meta.width, captured_meta.height);
+					us_blank_draw(blank, msg, w, h);
 				}
-				frame = blank->jpeg;
+				frame = (blank != NULL) ? blank->jpeg : server->stream->run->blank->jpeg;
 			}
 
 			struct evbuffer *buf;
