@@ -12,7 +12,8 @@ _USTR = ustreamer.bin
 _DUMP = ustreamer-dump.bin
 _V4P = ustreamer-v4p.bin
 
-_CFLAGS = -MD -c -std=c11 -Wall -Wextra -D_GNU_SOURCE $(CFLAGS)
+_GIT_VERSION := $(shell git -C $(dir $(abspath $(lastword $(MAKEFILE_LIST)))) rev-parse --short HEAD 2>/dev/null || echo "unknown")
+_CFLAGS = -MD -c -std=c11 -Wall -Wextra -D_GNU_SOURCE -DUS_GIT_VERSION=\"$(_GIT_VERSION)\" $(CFLAGS)
 
 _USTR_LDFLAGS = $(LDFLAGS) -lm -ljpeg -pthread -lrt -levent -levent_pthreads
 _DUMP_LDFLAGS = $(LDFLAGS) -lm -ljpeg -pthread -lrt

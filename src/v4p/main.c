@@ -188,7 +188,7 @@ static void _main_loop(void) {
 			continue;
 		}
 
-		if (us_capture_open(cap) < 0) {
+		if (us_capture_open(cap, 0) < 0) {
 			CHECK(us_drm_ensure_no_signal(drm));
 			_slowdown();
 			continue;

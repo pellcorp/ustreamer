@@ -28,12 +28,12 @@ const char *const US_HTML_INDEX_PAGE = " \
 	<html> \
 	<head> \
 		<meta charset=\"utf-8\" /> \
-		<title>μStreamer</title> \
+		<title>SimpleAF μStreamer</title> \
 		<style>body {font-family: monospace;}</style> \
 	</head> \
 	\
 	<body> \
-		<h3>&micro;Streamer v" US_VERSION "</h3> \
+		<h3>SimpleAF μStreamer " US_VERSION "</h3> \
 		<hr> \
 		<ul> \
 			<li> \

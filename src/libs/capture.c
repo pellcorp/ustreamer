@@ -92,7 +92,7 @@ static bool _capture_is_buffer_valid(const us_capture_s *cap, const struct v4l2_
 static int _capture_open_check_cap(us_capture_s *cap);
 static int _capture_open_dv_timings(us_capture_s *cap, bool apply);
 static int _capture_open_format(us_capture_s *cap, bool first);
-static void _capture_open_hw_fps(us_capture_s *cap);
+static void _capture_open_hw_fps(us_capture_s *cap, uint fps);
 static void _capture_open_jpeg_quality(us_capture_s *cap);
 static int _capture_open_io_method(us_capture_s *cap);
 static int _capture_open_io_method_mmap(us_capture_s *cap);
@@ -184,7 +184,7 @@ int us_capture_parse_io_method(const char *str) {
 	return -1;
 }
 
-int us_capture_open(us_capture_s *cap) {
+int us_capture_open(us_capture_s *cap, uint fps) {
 	us_capture_runtime_s *const run = cap->run;
 
 	if (access(cap->path, R_OK | W_OK) < 0) {
@@ -240,7 +240,7 @@ int us_capture_open(us_capture_s *cap) {
 			}
 		}
 	}
-	_capture_open_hw_fps(cap);
+	_capture_open_hw_fps(cap, fps);
 	_capture_open_jpeg_quality(cap);
 	if (_capture_open_io_method(cap) < 0) {
 		goto error;
@@ -840,7 +840,7 @@ static int _capture_open_format(us_capture_s *cap, bool first) {
 	return 0;
 }
 
-static void _capture_open_hw_fps(us_capture_s *cap) { // cppcheck-suppress constParameterPointer
+static void _capture_open_hw_fps(us_capture_s *cap, uint fps) { // cppcheck-suppress constParameterPointer
 	const us_capture_runtime_s *const run = cap->run;
 
 	struct v4l2_streamparm setfps = {.type = run->capture_type};
@@ -864,20 +864,17 @@ static void _capture_open_hw_fps(us_capture_s *cap) { // cppcheck-suppress const
 	US_MEMSET_ZERO(setfps);
 	setfps.type = run->capture_type;
 	TPF(numerator) = 1;
-	TPF(denominator) = -1; // Request maximum possible FPS
+	// When a specific fps is requested, add headroom so the camera has room to
+	// deliver reliably — the software frame dropping handles the exact output rate.
+	TPF(denominator) = (fps > 0) ? (fps + (fps >> 1) + 1) : (uint)-1;
 
 	if (us_xioctl(run->fd, VIDIOC_S_PARM, &setfps) < 0) {
 		_LOG_PERROR("Can't set HW FPS");
 		return;
 	}
 
-	if (TPF(numerator) != 1) {
-		_LOG_ERROR("Invalid HW FPS numerator: %u != 1", TPF(numerator));
-		return;
-	}
-
-	if (TPF(denominator) == 0) { // Не знаю, бывает ли так, но пускай на всякий случай
-		_LOG_ERROR("Invalid HW FPS denominator: 0");
+	if (TPF(numerator) == 0 || TPF(denominator) == 0) {
+		_LOG_ERROR("Invalid HW FPS: %u/%u", TPF(numerator), TPF(denominator));
 		return;
 	}
 
